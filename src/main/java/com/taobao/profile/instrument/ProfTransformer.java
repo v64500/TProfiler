@@ -12,8 +12,8 @@ import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.IllegalClassFormatException;
 import java.security.ProtectionDomain;
 
-import org.objectweb.asm.ClassAdapter;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
 
 import com.taobao.profile.Manager;
@@ -33,6 +33,7 @@ public class ProfTransformer implements ClassFileTransformer {
 	 */
 	public byte[] transform(ClassLoader loader, String className, Class<?> classBeingRedefined,
 	        ProtectionDomain protectionDomain, byte[] classfileBuffer) throws IllegalClassFormatException {
+		
 		if (ProfFilter.isNotNeedInjectClassLoader(loader.getClass().getName())) {
 			return classfileBuffer;
 		}
@@ -50,9 +51,22 @@ public class ProfTransformer implements ClassFileTransformer {
 		Profiler.instrumentClassCount.getAndIncrement();
 		try {
 			ClassReader reader = new ClassReader(classfileBuffer);
-			ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-			ClassAdapter adapter = new ProfClassAdapter(writer, className);
-			reader.accept(adapter, 0);
+//			ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+			
+//			Thanks to this optimization the above code is two times faster than the pre-
+//			vious one, because ChangeVersionAdapter does not transform any method.
+//			For common class transformations, which transform some or all methods, the
+//			speedup is smaller, but is still noticeable: it is indeed of the order of 10 to
+//			20%. Unfortunately this optimization requires to copy all the constants de-
+//			fined in the original class into the transformed one. This is not a problem
+//			for tranformations that add fields, methods or instructions, but this leads to
+//			bigger class files, compared to the unoptimized case, for transformations that
+//			remove or rename many class elements. It is therefore recommanded to use
+//			this optimization only for “additive” transformations.
+//			via asm4-guide
+			ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_MAXS);
+			ClassVisitor visitor = new ProfClassAdapter(writer, className);
+			reader.accept(visitor, 0);
 			// 生成新类字节码
 			return writer.toByteArray();
 		} catch (Exception e) {
